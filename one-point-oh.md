@@ -40,11 +40,6 @@ Priority follows from other team's priorities.
 
 New or more flexible std lib functions and code mods are expected as side effects of other work.
 
-New features which might require significant work:
-
-- [Multiple profiles in Sketches](https://github.com/KittyCAD/modeling-app/issues/1876)
-- Assemblies?
-
 
 ### Pre-paying technical debt
 
@@ -57,14 +52,14 @@ New features which might require significant work:
 - Supplying user-side IDs to engine
 - code mod API
 
-
-## Language priorities
+## Feature work
 
 **P1** (priority ordered):
 
 - reserve keywords (s)
   - https://github.com/KittyCAD/modeling-app/issues/4486
   - and give meaning to underscore in identifiers
+- assemblies (xl?) - see below
 - function args
   - named and optional args (m; *$0*)
   - only one non-named arg (m; *$1*)
@@ -102,6 +97,82 @@ New features which might require significant work:
   - reduce number of functions by using optional args (m-l; *$3; depends on $0*)
 - `var`/`roughly` syntax for unconstrained points/numbers (m-l)
   - changes how we do 'fixed point' constraints
+
+**P-Unknown**
+
+- [Multiple profiles in Sketches](https://github.com/KittyCAD/modeling-app/issues/1876) (m-l)
+
+### Assemblies
+
+TODO what are the 1.0 requirements? How must we interact with the frontend? Is module-as-part the right abstraction for assemblies?
+
+(I'm using 'render' as short-hand for sends commands to the engine)
+
+Requirements:
+
+- extend `import` syntax to allow importing the whole module (**P1**)
+  - replace `import()` for non-KCL objects (**P3**)
+- collect the module into an object to represent the part (**P1**)
+  - without rendering (**P1**)
+- Syntax to cause rendering of a part object (**P1**)
+- Manipulation of a part
+  - Access to tags and variables (**P2**)
+    - export tags/variables
+  - transformation (**P2**)
+  - extension (**P3**)
+    - e.g., if the module is a sketch, can we extrude it?
+- check code mods (don't) work, etc. (**P1**)
+
+Implementation plan:
+
+See also caching in performance section, below.
+
+Note: I don't think we have time to change the fundamental model enough to do this nicely with modules as proper objects with functions being side-effect free and returning a single object, etc.
+
+
+- treat modules as their own data type
+  - somewhat object-like, since they support field access
+  - somewhat function-like, for rendering
+- import:
+  - `import 'foo.kcl' as bar`/`import 'bar.kcl'`
+  - brings `bar` name into scope
+    - exported functions and variables of `bar` can be accessed using `bar.whatever`
+      - QUESTION: or `::`? Note that module is not a `self` for dispatch, but we do want to treat modules like structs?
+    - using `bar` must implicitly clone because the module cannot be modified by side-effects
+      - both in the engine and KCL
+      - variable/fn access doesn't need to clone, but assignment or pipeline use does
+    - using or assigning `bar` at the top-level causes rendering
+- for rendering, we 'replay' the whole module top-level *as if it were a function*
+  - what object does this create? An array of shapes?
+    - Can it be used in pipelines for transforms, etc.?
+    - This object needs to have the variables/tags/`tags` field, i.e., it *is* the part object, but with a UUID
+    - Does the engine support grouping of objects like this?
+  - Does treating it as a function work? Would multiple objects be rendered by side-effect in a function today?
+- `tags` of module contains all exported variables
+  - I think we need `export as`, given how much we rely on tags, which bumps the priority of fixing tags
+  - alternative: put all variables and tags in `tags` - back compat issue
+
+## Performance
+
+- Caching (**P2**)
+  - Incremental re-execution
+  - Goal
+    - sub-tree of AST and it's reverse-deps are identified as unchanged (even if transformed)
+    - program memory representation is preserved, no new calls to engine
+      - program memory repr must be complete (i.e., we've got all the info we need without engine calls and their side-effects)
+      - QUESTION: how is program memory GC'ed?
+      - QUESTION: What other compiler/interpreter state would need to be preserved/invalidated?
+    - can we use copy-on-write/ref counting for sharing program memory repr within the same run of a program?
+      - only valuable if we have a lot of instantiations of the same thing and the thing is large
+  - for 1.0
+    - per-file/module granularity
+      - invalidation and dependency tracking is easier
+        - hash a whole file for slightly more sophisticated change tracking rather than just a valid bit
+        - means we can skip parsing too, but would mean comment changes would affect us
+          - could hash the token stream (could use AST digest, but then we can't skip parsing. Would just need to compute it, not the stored version, easy to map a module to an AST digest)
+    - ref counting/cow? (**P3**)
+      - probably not a huge benefit if we are caching between runs
+    - still need the same changes to preserve/invalidate program memory/interpreter state
  
 ## User feedback
 
